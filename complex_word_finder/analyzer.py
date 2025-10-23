@@ -19,7 +19,7 @@ class ComplexWordAnalyzer:
         self.word_analyzer = WordAnalyzer()
         self.synonym_finder = SynonymFinder()
     
-    def analyze_text(self, text: str, config: AnalysisConfig) -> AnalysisResults:
+    async def analyze_text(self, text: str, config: AnalysisConfig) -> AnalysisResults:
         """
         Perform complete analysis of text for polysyllabic words.
         
@@ -47,7 +47,7 @@ class ComplexWordAnalyzer:
         
         # Find synonyms if requested
         if config.find_synonyms:
-            self._add_synonyms(word_data, config)
+            await self._add_synonyms(word_data, config)
         
         # Calculate totals
         total_occurrences = sum(data.count for data in word_data.values())
@@ -86,8 +86,8 @@ class ComplexWordAnalyzer:
         
         return word_data
     
-    def _add_synonyms(self, word_data: dict[str, WordData], config: AnalysisConfig):
-        """Add synonyms to word data."""
+    async def _add_synonyms(self, word_data: dict[str, WordData], config: AnalysisConfig):
+        """Add synonyms to word data using async requests."""
         self.console.print("🔍 Finding synonyms...")
         
         # Get words to process (respecting limit for efficiency)
@@ -100,10 +100,18 @@ class ComplexWordAnalyzer:
             )
             words_to_process = [word for word, _ in sorted_items[:config.limit]]
         
-        for word in track(words_to_process, description="Finding synonyms..."):
-            try:
-                synonyms = self.synonym_finder.find_synonyms(word, config.max_synonyms)
-                word_data[word].synonyms = synonyms
-            except Exception as e:
-                self.console.print(f"[yellow]Warning: Could not find synonyms for '{word}': {e}[/yellow]")
+        # Use batch processing for better performance
+        try:
+            synonym_results = await self.synonym_finder.find_synonyms_batch(
+                words_to_process, config.max_synonyms
+            )
+            
+            # Update word data with synonyms
+            for word in track(words_to_process, description="Processing synonyms..."):
+                word_data[word].synonyms = synonym_results.get(word, [])
+                
+        except Exception as e:
+            self.console.print(f"[yellow]Warning: Could not find synonyms: {e}[/yellow]")
+            # Fallback to empty synonyms
+            for word in words_to_process:
                 word_data[word].synonyms = []

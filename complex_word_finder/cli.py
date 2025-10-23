@@ -1,5 +1,6 @@
 """CLI interface for the Complex Word Finder."""
 
+import asyncio
 import click
 import sys
 from pathlib import Path
@@ -27,6 +28,11 @@ def main(input_file: Path, min_syllables: int, output: Path, synonyms: bool, lim
     
     INPUT_FILE: Path to the text file to analyze
     """
+    asyncio.run(_async_main(input_file, min_syllables, output, synonyms, limit, output_format))
+
+
+async def _async_main(input_file: Path, min_syllables: int, output: Path, synonyms: bool, limit: int, output_format: str):
+    """Async version of the main function."""
     _display_header()
     
     try:
@@ -43,7 +49,7 @@ def main(input_file: Path, min_syllables: int, output: Path, synonyms: bool, lim
         
         # Perform analysis
         analyzer = ComplexWordAnalyzer(console)
-        results = analyzer.analyze_text(text, config)
+        results = await analyzer.analyze_text(text, config)
         
         # Handle empty results
         if not results.word_data:

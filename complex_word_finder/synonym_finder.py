@@ -1,34 +1,26 @@
 """Synonym finding utilities for Brazilian Portuguese words."""
 
-import requests
-import time
+import asyncio
+import aiohttp
 from typing import List
 from bs4 import BeautifulSoup
 import re
 
 
 class SynonymFinder:
-    """Finds synonyms for Portuguese words using online resources."""
+    """Finds synonyms for Portuguese words using online resources with async support."""
     
     def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update({
+        self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        })
+        }
         self.delay = 1.0  # Delay between requests to be respectful
-        self._last_request_time = 0
+        self._semaphore = asyncio.Semaphore(3)  # Limit concurrent requests
+        self._analyzer = None  # Lazy-loaded WordAnalyzer for syllable counting
     
-    def _rate_limit(self):
-        """Implement rate limiting between requests."""
-        current_time = time.time()
-        time_since_last = current_time - self._last_request_time
-        if time_since_last < self.delay:
-            time.sleep(self.delay - time_since_last)
-        self._last_request_time = time.time()
-    
-    def find_synonyms(self, word: str, max_synonyms: int = 5) -> List[str]:
+    async def find_synonyms(self, word: str, max_synonyms: int = 5) -> List[str]:
         """
-        Find synonyms for a given Portuguese word.
+        Find synonyms for a given Portuguese word using async requests.
         
         Args:
             word: The word to find synonyms for
@@ -37,59 +29,124 @@ class SynonymFinder:
         Returns:
             List of synonyms
         """
-        # Define synonym sources
-        sources = [
-            self._get_synonyms_from_sinonimos_online,
-            self._get_synonyms_from_dicio
-        ]
-        
-        # Collect synonyms from all sources
-        all_synonyms = []
-        for source in sources:
-            try:
-                all_synonyms.extend(source(word))
-            except Exception:
-                continue  # Skip failed sources silently
+        # Create async session and run concurrent requests
+        async with aiohttp.ClientSession(
+            headers=self.headers,
+            timeout=aiohttp.ClientTimeout(total=10)
+        ) as session:
+            # Define synonym sources as coroutines
+            tasks = [
+                self._get_synonyms_from_sinonimos_online(session, word),
+                self._get_synonyms_from_dicio(session, word)
+            ]
+            
+            # Run all tasks concurrently and collect results
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Flatten successful results
+            all_synonyms = []
+            for result in results:
+                if isinstance(result, list):
+                    all_synonyms.extend(result)
         
         # Filter and deduplicate
         return self._filter_and_deduplicate(all_synonyms, word, max_synonyms)
     
+    def find_synonyms_sync(self, word: str, max_synonyms: int = 5) -> List[str]:
+        """
+        Synchronous wrapper for finding synonyms.
+        
+        Args:
+            word: The word to find synonyms for
+            max_synonyms: Maximum number of synonyms to return
+            
+        Returns:
+            List of synonyms
+        """
+        return asyncio.run(self.find_synonyms(word, max_synonyms))
+    
+    async def find_synonyms_batch(self, words: List[str], max_synonyms: int = 5) -> dict[str, List[str]]:
+        """
+        Find synonyms for multiple words concurrently.
+        
+        Args:
+            words: List of words to find synonyms for
+            max_synonyms: Maximum synonyms per word
+            
+        Returns:
+            Dictionary mapping words to their synonyms
+        """
+        # Create semaphore-limited tasks for batch processing
+        tasks = []
+        for word in words:
+            task = self._find_synonyms_with_semaphore(word, max_synonyms)
+            tasks.append((word, task))
+        
+        # Execute all tasks with controlled concurrency
+        results = {}
+        for word, task in tasks:
+            try:
+                synonyms = await task
+                results[word] = synonyms
+            except Exception:
+                results[word] = []
+        
+        return results
+    
+    async def _find_synonyms_with_semaphore(self, word: str, max_synonyms: int) -> List[str]:
+        """Find synonyms with semaphore-controlled concurrency."""
+        async with self._semaphore:
+            await asyncio.sleep(self.delay)  # Rate limiting
+            return await self.find_synonyms(word, max_synonyms)
+    
     def _filter_and_deduplicate(self, synonyms: List[str], original_word: str, max_count: int) -> List[str]:
-        """Filter synonyms and remove duplicates."""
+        """Filter synonyms and remove duplicates, keeping only simpler words."""
+        if self._analyzer is None:
+            from .word_analyzer import WordAnalyzer  # Import here to avoid circular imports
+            self._analyzer = WordAnalyzer()
+        
         word_lower = original_word.lower()
+        original_syllables = self._analyzer.count_syllables(original_word)
+        
         seen = set()
         unique_synonyms = []
         
         for synonym in synonyms:
             clean_synonym = synonym.lower().strip()
             
-            if (clean_synonym != word_lower and 
-                clean_synonym not in seen and 
-                len(clean_synonym) > 2):
+            # Check basic conditions first
+            if (clean_synonym == word_lower or 
+                clean_synonym in seen or 
+                len(clean_synonym) <= 2):
+                continue
+            
+            # Count syllables and only keep if fewer than original
+            synonym_syllables = self._analyzer.count_syllables(clean_synonym)
+            if synonym_syllables < original_syllables:
                 unique_synonyms.append(synonym)
                 seen.add(clean_synonym)
         
         return unique_synonyms[:max_count]
     
-    def _get_synonyms_from_sinonimos_online(self, word: str) -> List[str]:
+    async def _get_synonyms_from_sinonimos_online(self, session: aiohttp.ClientSession, word: str) -> List[str]:
         """
-        Get synonyms from sinonimos.com.br
+        Get synonyms from sinonimos.com.br using async requests.
         
         Args:
+            session: Async HTTP session
             word: The word to search for
             
         Returns:
             List of synonyms found
         """
-        self._rate_limit()
-        
         url = f"https://www.sinonimos.com.br/{word}/"
         
         try:
-            response = self.session.get(url, timeout=10)
-            response.raise_for_status()
+            async with session.get(url) as response:
+                response.raise_for_status()
+                content = await response.read()
             
-            soup = BeautifulSoup(response.content, 'html.parser')
+            soup = BeautifulSoup(content, 'html.parser')
             synonyms = []
             
             # Look for synonym lists in various elements
@@ -113,25 +170,25 @@ class SynonymFinder:
         except Exception:
             return []
     
-    def _get_synonyms_from_dicio(self, word: str) -> List[str]:
+    async def _get_synonyms_from_dicio(self, session: aiohttp.ClientSession, word: str) -> List[str]:
         """
-        Get synonyms from dicio.com.br
+        Get synonyms from dicio.com.br using async requests.
         
         Args:
+            session: Async HTTP session
             word: The word to search for
             
         Returns:
             List of synonyms found
         """
-        self._rate_limit()
-        
         url = f"https://www.dicio.com.br/{word}/"
         
         try:
-            response = self.session.get(url, timeout=10)
-            response.raise_for_status()
+            async with session.get(url) as response:
+                response.raise_for_status()
+                content = await response.read()
             
-            soup = BeautifulSoup(response.content, 'html.parser')
+            soup = BeautifulSoup(content, 'html.parser')
             synonyms = []
             
             # Look for synonym sections
@@ -179,29 +236,3 @@ class SynonymFinder:
         
         return local_synonyms.get(word.lower(), [])
     
-    def batch_find_synonyms(self, words: List[str], max_synonyms: int = 5) -> dict:
-        """
-        Find synonyms for multiple words in batch.
-        
-        Args:
-            words: List of words to find synonyms for
-            max_synonyms: Maximum synonyms per word
-            
-        Returns:
-            Dictionary mapping words to their synonyms
-        """
-        results = {}
-        
-        for i, word in enumerate(words):
-            try:
-                synonyms = self.find_synonyms(word, max_synonyms)
-                results[word] = synonyms
-                
-                # Add a longer delay every 10 requests to be extra respectful
-                if (i + 1) % 10 == 0:
-                    time.sleep(2.0)
-                    
-            except Exception:
-                results[word] = []
-        
-        return results
