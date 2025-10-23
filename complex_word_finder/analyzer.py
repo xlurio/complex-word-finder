@@ -90,18 +90,32 @@ class ComplexWordAnalyzer:
         """Add synonyms to word data using async requests."""
         self.console.print("🔍 Finding synonyms...")
         
-        # Get words to process (respecting limit for efficiency)
-        words_to_process = list(word_data.keys())
+        # Sort all words using the same logic as sorted_words property
+        all_items = list(word_data.items())
+        sorted_items = sorted(
+            all_items, 
+            key=lambda x: (-x[1].syllables, -x[1].count, x[0])
+        )
+        
+        # Apply offset and limit to determine which words to process for synonyms
+        start_idx = config.offset
+        end_idx = None
+        
         if config.limit:
-            # Sort to get the most relevant words first
-            sorted_items = sorted(
-                word_data.items(), 
-                key=lambda x: (-x[1].syllables, -x[1].count)
-            )
-            words_to_process = [word for word, _ in sorted_items[:config.limit]]
-            self.console.print(f"[dim]Processing synonyms for {len(words_to_process)} words (limit: {config.limit})[/dim]")
-        else:
-            self.console.print(f"[dim]Processing synonyms for all {len(words_to_process)} words[/dim]")
+            end_idx = start_idx + config.limit
+        
+        items_to_process = sorted_items[start_idx:end_idx]
+        words_to_process = [word for word, _ in items_to_process]
+        
+        # Optional debug info (can be removed in production)
+        if config.limit or config.offset:
+            range_desc = f"words {start_idx + 1}"
+            if end_idx:
+                range_desc += f"-{min(end_idx, len(sorted_items))}"
+            else:
+                range_desc += f"-{len(sorted_items)}"
+            range_desc += f" of {len(sorted_items)}"
+            self.console.print(f"[dim]Processing synonyms for {len(words_to_process)} {range_desc}[/dim]")
         
         # Use batch processing for better performance
         try:

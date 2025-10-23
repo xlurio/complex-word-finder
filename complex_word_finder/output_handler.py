@@ -55,6 +55,17 @@ class OutputHandler:
         self.console.print(
             f"   • Minimum syllables: [green]{results.config.min_syllables}[/green]"
         )
+        
+        # Show pagination info if offset or limit is used
+        displayed_count = len(results.sorted_words)
+        if results.config.offset > 0 or results.config.limit:
+            start_num = results.config.offset + 1
+            end_num = results.config.offset + displayed_count
+            self.console.print(f"   • Showing words [cyan]{start_num}-{end_num}[/cyan] of [cyan]{results.polysyllabic_words}[/cyan]")
+            
+            if results.config.limit and (results.config.offset + results.config.limit) < results.polysyllabic_words:
+                next_offset = results.config.offset + results.config.limit
+                self.console.print(f"   • [dim]Use --offset {next_offset} to see more results[/dim]")
 
     def _display_table(self, sorted_words: List[Tuple[str, WordData]]):
         """Display results as a formatted table."""

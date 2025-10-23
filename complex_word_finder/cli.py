@@ -21,17 +21,18 @@ console = Console()
 @click.option('--output', '-o', type=click.Path(path_type=Path), help='Output file to save results')
 @click.option('--synonyms/--no-synonyms', default=True, help='Find synonyms for polysyllabic words (default: enabled)')
 @click.option('--limit', '-l', type=int, help='Limit the number of words to process')
+@click.option('--offset', type=int, default=0, help='Skip this many words from the beginning (for pagination)')
 @click.option('--format', 'output_format', type=click.Choice(['table', 'json', 'csv']), default='table', help='Output format')
-def main(input_file: Path, min_syllables: int, output: Path, synonyms: bool, limit: int, output_format: str):
+def main(input_file: Path, min_syllables: int, output: Path, synonyms: bool, limit: int, offset: int, output_format: str):
     """
     Analyze Brazilian Portuguese text to find polysyllabic words, count syllables, and find synonyms.
     
     INPUT_FILE: Path to the text file to analyze
     """
-    asyncio.run(_async_main(input_file, min_syllables, output, synonyms, limit, output_format))
+    asyncio.run(_async_main(input_file, min_syllables, output, synonyms, limit, offset, output_format))
 
 
-async def _async_main(input_file: Path, min_syllables: int, output: Path, synonyms: bool, limit: int, output_format: str):
+async def _async_main(input_file: Path, min_syllables: int, output: Path, synonyms: bool, limit: int, offset: int, output_format: str):
     """Async version of the main function."""
     _display_header()
     
@@ -41,6 +42,7 @@ async def _async_main(input_file: Path, min_syllables: int, output: Path, synony
             min_syllables=min_syllables,
             find_synonyms=synonyms,
             limit=limit,
+            offset=offset,
             output_format=OutputFormat(output_format)
         )
         
@@ -54,6 +56,12 @@ async def _async_main(input_file: Path, min_syllables: int, output: Path, synony
         # Handle empty results
         if not results.word_data:
             console.print(f"[yellow]No polysyllabic words found with {min_syllables}+ syllables[/yellow]")
+            return
+        
+        # Check if offset is beyond available data
+        total_words = len(results.word_data)
+        if offset >= total_words:
+            console.print(f"[yellow]Offset {offset} is beyond available data ({total_words} words found). No results to show.[/yellow]")
             return
         
         # Display and save results

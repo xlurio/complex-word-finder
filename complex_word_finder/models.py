@@ -31,6 +31,7 @@ class AnalysisConfig:
     min_syllables: int = 3
     max_synonyms: int = 5
     limit: int = None
+    offset: int = 0
     find_synonyms: bool = True
     output_format: OutputFormat = OutputFormat.TABLE
 
@@ -46,10 +47,20 @@ class AnalysisResults:
 
     @property
     def sorted_words(self) -> List[Tuple[str, WordData]]:
-        """Get words sorted by syllables and frequency."""
+        """Get words sorted by syllables and frequency with offset and limit."""
         items = list(self.word_data.items())
-        sorted_items = sorted(items, key=lambda x: (-x[1].syllables, -x[1].count))
+        
+        # Sort by: 1) syllables (desc), 2) count (desc), 3) word alphabetically (asc) for consistency
+        sorted_items = sorted(
+            items, 
+            key=lambda x: (-x[1].syllables, -x[1].count, x[0])
+        )
+        
+        # Apply offset first, then limit
+        start_idx = self.config.offset
+        end_idx = None
         
         if self.config.limit:
-            return sorted_items[:self.config.limit]
-        return sorted_items
+            end_idx = start_idx + self.config.limit
+        
+        return sorted_items[start_idx:end_idx]
