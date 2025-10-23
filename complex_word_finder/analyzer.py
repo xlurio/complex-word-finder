@@ -99,6 +99,9 @@ class ComplexWordAnalyzer:
                 key=lambda x: (-x[1].syllables, -x[1].count)
             )
             words_to_process = [word for word, _ in sorted_items[:config.limit]]
+            self.console.print(f"[dim]Processing synonyms for {len(words_to_process)} words (limit: {config.limit})[/dim]")
+        else:
+            self.console.print(f"[dim]Processing synonyms for all {len(words_to_process)} words[/dim]")
         
         # Use batch processing for better performance
         try:

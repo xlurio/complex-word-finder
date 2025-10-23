@@ -67,7 +67,7 @@ class SynonymFinder:
     
     async def find_synonyms_batch(self, words: List[str], max_synonyms: int = 5) -> dict[str, List[str]]:
         """
-        Find synonyms for multiple words concurrently.
+        Find synonyms for multiple words concurrently using a single session.
         
         Args:
             words: List of words to find synonyms for
@@ -76,28 +76,61 @@ class SynonymFinder:
         Returns:
             Dictionary mapping words to their synonyms
         """
-        # Create semaphore-limited tasks for batch processing
-        tasks = []
-        for word in words:
-            task = self._find_synonyms_with_semaphore(word, max_synonyms)
-            tasks.append((word, task))
-        
-        # Execute all tasks with controlled concurrency
-        results = {}
-        for word, task in tasks:
-            try:
-                synonyms = await task
-                results[word] = synonyms
-            except Exception:
-                results[word] = []
+        # Use a single session for all requests to be more efficient
+        async with aiohttp.ClientSession(
+            headers=self.headers,
+            timeout=aiohttp.ClientTimeout(total=10)
+        ) as session:
+            # Create semaphore-limited tasks for batch processing
+            semaphore = asyncio.Semaphore(3)  # Limit concurrent requests
+            
+            async def process_word(word: str) -> tuple[str, List[str]]:
+                async with semaphore:
+                    await asyncio.sleep(self.delay)  # Rate limiting
+                    synonyms = await self._find_synonyms_for_word(session, word, max_synonyms)
+                    return word, synonyms
+            
+            # Execute all tasks concurrently
+            tasks = [process_word(word) for word in words]
+            results_list = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Convert to dictionary, handling exceptions
+            results = {}
+            for result in results_list:
+                if isinstance(result, tuple):
+                    word, synonyms = result
+                    results[word] = synonyms
+                else:
+                    # Handle exceptions by assigning empty list to failed words
+                    # We don't have the word name here, so we'll assign later
+                    pass
+            
+            # Ensure all words have entries, even if failed
+            for word in words:
+                if word not in results:
+                    results[word] = []
         
         return results
     
-    async def _find_synonyms_with_semaphore(self, word: str, max_synonyms: int) -> List[str]:
-        """Find synonyms with semaphore-controlled concurrency."""
-        async with self._semaphore:
-            await asyncio.sleep(self.delay)  # Rate limiting
-            return await self.find_synonyms(word, max_synonyms)
+    async def _find_synonyms_for_word(self, session: aiohttp.ClientSession, word: str, max_synonyms: int) -> List[str]:
+        """Find synonyms for a single word using the provided session."""
+        # Define synonym sources as coroutines using the shared session
+        tasks = [
+            self._get_synonyms_from_sinonimos_online(session, word),
+            self._get_synonyms_from_dicio(session, word)
+        ]
+        
+        # Run all tasks concurrently and collect results
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Flatten successful results
+        all_synonyms = []
+        for result in results:
+            if isinstance(result, list):
+                all_synonyms.extend(result)
+        
+        # Filter and deduplicate
+        return self._filter_and_deduplicate(all_synonyms, word, max_synonyms)
     
     def _filter_and_deduplicate(self, synonyms: List[str], original_word: str, max_count: int) -> List[str]:
         """Filter synonyms and remove duplicates, keeping only simpler words."""
