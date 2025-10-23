@@ -1,0 +1,30 @@
+[project]
+name = "complex-word-finder"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Lucas Calegario",email = "lucas.c.calegario@outlook.com"}
+]
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.13"
+dependencies = [
+    "click>=8.0.0",
+    "nltk>=3.8",
+    "pyphen>=0.14.0",
+    "requests>=2.28.0",
+    "rich>=13.0.0",
+    "beautifulsoup4>=4.11.0",
+]
+
+[project.scripts]
+complex-word-finder = "complex_word_finder.cli:main"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "ruff (>=0.14.1,<0.15.0)"
+]
