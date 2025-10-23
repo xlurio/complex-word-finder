@@ -44,28 +44,77 @@ class TextProcessor:
         """
         # Tokenize and clean
         tokens = word_tokenize(text.lower(), language='portuguese')
-        
+
         # Filter and clean tokens in one pass
-        return [
-            self._clean_token(token) 
-            for token in tokens
-            if self._is_valid_word(token)
-        ]
+        result = []
+        for token in tokens:
+            if not token:
+                continue
+            # Handle enclitic pronouns (e.g., "diga-me" -> "diga") before cleaning
+            stripped = self._strip_enclitic(token)
+            clean = self._clean_token(stripped)
+            if self._is_valid_word(clean):
+                result.append(clean)
+
+        return result
     
     def _clean_token(self, token: str) -> str:
         """Remove punctuation from token."""
+        # Remove punctuation (keep letters only)
         return re.sub(r'[^\w]', '', token)
     
     def _is_valid_word(self, token: str) -> bool:
         """Check if token represents a valid word."""
-        clean_token = self._clean_token(token)
-        
+        if not token:
+            return False
+
+        # token here is expected to be already cleaned (no punctuation)
+        clean_token = token
         return (
-            clean_token and
+            bool(clean_token) and
             clean_token.isalpha() and
             len(clean_token) >= 3 and
             clean_token not in self.portuguese_stopwords
         )
+
+    def _strip_enclitic(self, token: str) -> str:
+        """Remove enclitic pronouns from a token if present.
+
+        Examples:
+            'diga-me' -> 'diga'
+            'diga.me' -> 'diga' (punctuation variants)
+            'dizme' -> 'diz' (best-effort for missing hyphen)
+        """
+        if not token:
+            return token
+
+        # Common Portuguese clitic pronouns (including contracted forms)
+        clitics_hyphen = {
+            'me', 'te', 'se', 'o', 'a', 'nos', 'vos', 'lhe', 'lhes',
+            'lo', 'la', 'los', 'las'
+        }
+        # For tokens without a hyphen we are conservative and only strip
+        # multi-letter clitics (to avoid removing final 'a'/'o' from normal words).
+        clitics_nohyphen = {c for c in clitics_hyphen if len(c) >= 2}
+
+        # If token contains a hyphen (most common for enclisis), check suffix
+        if '-' in token:
+            prefix, suffix = token.rsplit('-', 1)
+            if suffix.lower() in clitics_hyphen and len(prefix) >= 3:
+                return prefix
+            # if not a clitic, return original token
+            return token
+
+        # No hyphen: attempt heuristic split if token ends with a clitic
+        lower = token.lower()
+        # Check longer clitics first to avoid partial matches (e.g., 'lhes' before 'he')
+        sorted_clitics = sorted(clitics_nohyphen, key=lambda s: -len(s))
+        for c in sorted_clitics:
+            if lower.endswith(c) and len(token) > len(c) + 2:
+                # Return portion before the clitic
+                return token[:-len(c)]
+
+        return token
     
     def clean_text(self, text: str) -> str:
         """
