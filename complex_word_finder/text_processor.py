@@ -93,9 +93,6 @@ class TextProcessor:
             'me', 'te', 'se', 'o', 'a', 'nos', 'vos', 'lhe', 'lhes',
             'lo', 'la', 'los', 'las'
         }
-        # For tokens without a hyphen we are conservative and only strip
-        # multi-letter clitics (to avoid removing final 'a'/'o' from normal words).
-        clitics_nohyphen = {c for c in clitics_hyphen if len(c) >= 2}
 
         # If token contains a hyphen (most common for enclisis), check suffix
         if '-' in token:
@@ -104,15 +101,6 @@ class TextProcessor:
                 return prefix
             # if not a clitic, return original token
             return token
-
-        # No hyphen: attempt heuristic split if token ends with a clitic
-        lower = token.lower()
-        # Check longer clitics first to avoid partial matches (e.g., 'lhes' before 'he')
-        sorted_clitics = sorted(clitics_nohyphen, key=lambda s: -len(s))
-        for c in sorted_clitics:
-            if lower.endswith(c) and len(token) > len(c) + 2:
-                # Return portion before the clitic
-                return token[:-len(c)]
 
         return token
     
